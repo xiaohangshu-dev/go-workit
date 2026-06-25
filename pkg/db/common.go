@@ -5,10 +5,10 @@ import (
 )
 
 const (
-	MySQLDefaultDns     = "root:123456@tcp(localhost:3306)/test?charset=utf8mb4&parseTime=True&loc=Local&allowPublicKeyRetrieval=true"
-	PostgresDefaultDns  = "host=localhost user=postgres password=123456 dbname=postgres port=5432 sslmode=disable TimeZone=Asia/Shanghai"
-	SQLServerDefaultDsn = "sqlserver://sa:your_password@localhost:1433?database=master"
-	SQLiteDefaultDsn    = "test.db"
+	MySQLDefaultDSN     = "root:123456@tcp(localhost:3306)/test?charset=utf8mb4&parseTime=True&loc=Local&allowPublicKeyRetrieval=true"
+	PostgresDefaultDSN  = "host=localhost user=postgres password=123456 dbname=postgres port=5432 sslmode=disable TimeZone=Asia/Shanghai"
+	SQLServerDefaultDSN = "sqlserver://sa:your_password@localhost:1433?database=master"
+	SQLiteDefaultDSN    = "test.db"
 	MaxOpenConns        = 10
 	MaxIdleConns        = 5
 	ConnMaxLifetime     = 10 * time.Minute

@@ -17,7 +17,7 @@ type Options struct {
 }
 
 // NewPostgresDB
-func NewClinet(lc fx.Lifecycle, opts *Options, logger *zap.Logger) (*gorm.DB, error) {
+func NewClient(lc fx.Lifecycle, opts *Options, logger *zap.Logger) (*gorm.DB, error) {
 
 	if opts.Config.Logger == nil {
 		opts.Config.Logger = gormx.NewGormZapLogger(logger, opts.LogLevel, opts.SlowThreshold)

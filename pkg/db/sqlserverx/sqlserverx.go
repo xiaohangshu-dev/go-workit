@@ -14,7 +14,7 @@ type Options struct {
 	DSN string
 }
 
-func NewClinet(lc fx.Lifecycle, opts *Options, logger *zap.Logger) *sql.DB {
+func NewClient(lc fx.Lifecycle, opts *Options, logger *zap.Logger) *sql.DB {
 
 	conn, err := sql.Open("sqlserver", opts.DSN)
 	if err != nil {

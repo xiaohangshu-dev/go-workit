@@ -54,7 +54,7 @@ func (d *Options) UseMySQL(instanceName string, fn func(*mysqlx.Options)) *Optio
 		// 单库，第一次注册 default，提供不带 name 的数据库
 		d.container = append(d.container,
 			fx.Provide(func(lc fx.Lifecycle, logger *zap.Logger) *sql.DB {
-				return mysqlx.NewClinet(lc, opts, logger)
+				return mysqlx.NewClient(lc, opts, logger)
 			}),
 		)
 	} else {
@@ -63,7 +63,7 @@ func (d *Options) UseMySQL(instanceName string, fn func(*mysqlx.Options)) *Optio
 			fx.Provide(
 				fx.Annotate(
 					func(lc fx.Lifecycle, logger *zap.Logger) *sql.DB {
-						return mysqlx.NewClinet(lc, opts, logger)
+						return mysqlx.NewClient(lc, opts, logger)
 					},
 					fx.ResultTags(`name:"`+instanceName+`"`),
 				),
@@ -104,7 +104,7 @@ func (d *Options) UsePostgresSQL(instanceName string, fn func(*pgsqlx.Options)) 
 		// 单库，第一次注册 default，提供不带 name 的数据库
 		d.container = append(d.container,
 			fx.Provide(func(lc fx.Lifecycle, logger *zap.Logger) *sql.DB {
-				return pgsqlx.NewClinet(lc, opts, logger)
+				return pgsqlx.NewClient(lc, opts, logger)
 			}),
 		)
 	} else {
@@ -113,7 +113,7 @@ func (d *Options) UsePostgresSQL(instanceName string, fn func(*pgsqlx.Options)) 
 			fx.Provide(
 				fx.Annotate(
 					func(lc fx.Lifecycle, logger *zap.Logger) *sql.DB {
-						return pgsqlx.NewClinet(lc, opts, logger)
+						return pgsqlx.NewClient(lc, opts, logger)
 					},
 					fx.ResultTags(`name:"`+instanceName+`"`),
 				),
@@ -153,7 +153,7 @@ func (d *Options) UseSQLServer(instanceName string, fn func(*sqlserverx.Options)
 		// 单库，第一次注册 default，提供不带 name 的数据库
 		d.container = append(d.container,
 			fx.Provide(func(lc fx.Lifecycle, logger *zap.Logger) *sql.DB {
-				return sqlserverx.NewClinet(lc, opts, logger)
+				return sqlserverx.NewClient(lc, opts, logger)
 			}),
 		)
 	} else {
@@ -162,7 +162,7 @@ func (d *Options) UseSQLServer(instanceName string, fn func(*sqlserverx.Options)
 			fx.Provide(
 				fx.Annotate(
 					func(lc fx.Lifecycle, logger *zap.Logger) *sql.DB {
-						return sqlserverx.NewClinet(lc, opts, logger)
+						return sqlserverx.NewClient(lc, opts, logger)
 					},
 					fx.ResultTags(`name:"`+instanceName+`"`),
 				),
@@ -202,7 +202,7 @@ func (d *Options) UseSQLite(instanceName string, fn func(*sqlitex.Options)) *Opt
 		// 单库，第一次注册 default，提供不带 name 的数据库
 		d.container = append(d.container,
 			fx.Provide(func(lc fx.Lifecycle, logger *zap.Logger) *sql.DB {
-				return sqlitex.NewClinet(lc, opts, logger)
+				return sqlitex.NewClient(lc, opts, logger)
 			}),
 		)
 	} else {
@@ -211,7 +211,7 @@ func (d *Options) UseSQLite(instanceName string, fn func(*sqlitex.Options)) *Opt
 			fx.Provide(
 				fx.Annotate(
 					func(lc fx.Lifecycle, logger *zap.Logger) *sql.DB {
-						return sqlitex.NewClinet(lc, opts, logger)
+						return sqlitex.NewClient(lc, opts, logger)
 					},
 					fx.ResultTags(`name:"`+instanceName+`"`),
 				),

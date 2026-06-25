@@ -4,6 +4,58 @@
 
 ---
 
+## 新增发现的不足（第二轮分析）
+
+### 7.1 拼写与命名问题
+
+| 位置 | 问题 | 说明 |
+|------|------|------|
+| [`examples/quckstart/`](examples/quckstart/) | 目录名拼写错误 | "quckstart" → "quickstart"（缺少 i）|
+| [`pkg/db/common.go:8`](pkg/db/common.go:8) | 常量 `MySQLDefaultDns` | DNS → **DSN**（Data Source Name）|
+| [`pkg/db/common.go:9`](pkg/db/common.go:9) | `PostgresDefaultDns` | 同上 |
+| [`pkg/db/common.go:10`](pkg/db/common.go:10) | `SQLServerDefaultDsn` | 同上（且大小写不一致）|
+| [`pkg/db/pool.go:27`](pkg/db/pool.go:27) | 日志 `sucess` | → "success" |
+| [`pkg/db/mysqlx/mysql.go:17`](pkg/db/mysqlx/mysql.go:17) | 函数名 `NewClinet` | → `NewClient`（缺少 i）|
+
+### 7.2 组件生命周期管理缺失
+
+| 组件 | 问题 |
+|------|------|
+| [`pkg/components/mongox/mongo.go`](pkg/components/mongox/mongo.go) | `NewClient` 未注册 OnStop 钩子关闭连接，可能导致连接泄漏 |
+| [`pkg/components/kafkax/kafka.go`](pkg/components/kafkax/kafka.go) | `NewReader`/`NewWriter` 未注册 OnStop 钩子关闭资源 |
+| [`pkg/components/miniox/minio.go`](pkg/components/miniox/minio.go) | 需检查是否有关闭逻辑 |
+| [`pkg/components/elasticx/elasticx.go`](pkg/components/elasticx/elasticx.go) | 需检查生命周期管理 |
+
+### 7.3 代码实现质量
+
+| 位置 | 问题 |
+|------|------|
+| [`pkg/tools/validate/validate.go`](pkg/tools/validate/validate.go) | 每次调用 `IsEmail`/`IsPhone`/`IsIDCard` 都用 `regexp.MustCompile` 编译正则，应改为包级 `var` + `sync.Once` |
+| [`pkg/tools/convert/convert.go`](pkg/tools/convert/convert.go) | `ToString` 未处理 `float32`、`int32`、`int64`、`uint` 等常见类型 |
+| [`pkg/tools/encrypt/encrypt.go`](pkg/tools/encrypt/encrypt.go) | MD5 已不安全，应标记为 deprecated 或移除 |
+| [`pkg/db/mysqlx/mysql.go:25-29`](pkg/db/mysqlx/mysql.go:25-29) | `Ping()` 失败后 `panic`，应返回 error（Builder 中已统一用 panic？不一致）|
+| [`pkg/webapp/ginx/sse/sse.go`](pkg/webapp/ginx/sse/sse.go) | `Close()` 是空方法，不释放任何资源 |
+| [`pkg/webapp/web/chaims_type.go`](pkg/webapp/web/chaims_type.go) | 大量 WS-Federation claim 常量（50+ 个 .NET 平台的 URI），Go 框架中使用场景极少 |
+| [`pkg/webapp/auth/scheme/jwt/jwt_bearer.go`](pkg/webapp/auth/scheme/jwt/jwt_bearer.go) | 硬编码 `RS256`/`HS256`，应通过配置指定 |
+| [`pkg/tools/excel/excel.go:29`](pkg/tools/excel/excel.go:29) | `cell := excelize.Cell{Value: cell}` 变量名与导入包名冲突，且不必要的包装 |
+
+### 7.4 示例问题
+
+| 示例 | 问题 |
+|------|------|
+| [`examples/quckstart/main.go`](examples/quckstart/main.go) | 导入了 `swagger docs` 但未调用 `app.UseSwagger()` |
+| [`examples/di/main.go`](examples/di/main.go) | Swagger 注解与 DI 示例无关 |
+| [`examples/quickstart`](examples/quickstart) | 目录名拼写错误，无法通过 `go run ./examples/quickstart` 运行 |
+
+### 7.5 框架 API 不完整
+
+| 位置 | 问题 |
+|------|------|
+| [`pkg/app/application_builder.go:102`](pkg/app/application_builder.go:102) | `ConfigureOptions` 标记为"暂未实现"，文档注释中提到了但代码为空 |
+| `pkg/webapp/reqdecp/` | 请求解压功能与 `pkg/webapp/ginx/req_decompression.go` 职责重叠 |
+
+---
+
 ## 一、代码设计与质量问题
 
 ### 1.1 严重命名错误：`chaims` → `claims`

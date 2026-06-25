@@ -23,7 +23,7 @@ func ConfigureConnectionPool(sqlDB *sql.DB, cfg DatabaseConfig, logger *zap.Logg
 				logger.Error("Failed to ping database on start", zap.Error(err))
 				return err
 			}
-			logger.Info("Database connection sucess!")
+			logger.Info("Database connection successful")
 			return nil
 		},
 		// OnStop 时关闭数据库连接
