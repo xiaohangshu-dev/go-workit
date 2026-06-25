@@ -63,6 +63,10 @@ type Options struct {
 	Timeout time.Duration
 	// DefaultHeaders 默认请求头，每次请求会自动添加
 	DefaultHeaders map[string]string
+	// Retry 重试策略，默认不重试
+	Retry RetryOptions
+	// CircuitBreaker 熔断器配置，默认不启用
+	CircuitBreaker CircuitBreakerOptions
 }
 
 func (o *Options) normalize() {
@@ -86,8 +90,9 @@ func NewOptions() *Options {
 
 // Client 可注入的 HTTP 客户端，封装了请求构建、序列化、反序列化。
 type Client struct {
-	options *Options
-	client  *http.Client
+	options        *Options
+	client         *http.Client
+	circuitBreaker *CircuitBreaker
 }
 
 // NewClient 创建 HTTP 客户端
@@ -97,12 +102,23 @@ func NewClient(options *Options) *Client {
 	}
 	options.normalize()
 
-	return &Client{
+	c := &Client{
 		options: options,
 		client: &http.Client{
 			Timeout: options.Timeout,
 		},
 	}
+
+	// 配置了重试或熔断时才启用熔断器
+	if options.Retry.MaxRetries > 0 || options.CircuitBreaker.FailureThreshold > 0 {
+		cbOpts := options.CircuitBreaker
+		if cbOpts.FailureThreshold <= 0 {
+			cbOpts.FailureThreshold = 999 // 不主动熔断，仅配合重试
+		}
+		c.circuitBreaker = NewCircuitBreaker(cbOpts)
+	}
+
+	return c
 }
 
 // resolveURL 拼接 BaseURL 和请求路径
@@ -126,37 +142,84 @@ func (c *Client) newRequest(ctx context.Context, method, path string, body io.Re
 	return req, nil
 }
 
-// doRequest 发送请求并解析响应
+// doRequest 发送请求并解析响应（支持重试和熔断）
 func (c *Client) doRequest(req *http.Request, result any, allowedStatuses ...int) (*http.Response, error) {
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("http: request %s %s failed: %w", req.Method, req.URL.String(), err)
+	// 熔断检查
+	if c.circuitBreaker != nil && !c.circuitBreaker.AllowRequest() {
+		return nil, fmt.Errorf("http: circuit breaker open, request %s %s rejected", req.Method, req.URL.String())
 	}
-	defer resp.Body.Close()
 
-	if len(allowedStatuses) > 0 {
-		statusOK := false
-		for _, s := range allowedStatuses {
-			if resp.StatusCode == s {
-				statusOK = true
-				break
+	maxRetries := c.options.Retry.MaxRetries
+	if c.circuitBreaker == nil {
+		maxRetries = 0 // 没有熔断器时也不重试（未配置弹性策略）
+	}
+
+	var lastErr error
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		// 重试前等待（指数退避）
+		if attempt > 0 {
+			delay := retryDelay(attempt, c.options.Retry.BaseDelay, c.options.Retry.MaxDelay)
+			select {
+			case <-time.After(delay):
+			case <-req.Context().Done():
+				return nil, req.Context().Err()
 			}
 		}
+
+		resp, err := c.client.Do(req)
+		if err != nil {
+			lastErr = err
+			if c.circuitBreaker != nil {
+				c.circuitBreaker.OnFailure()
+			}
+			continue
+		}
+		defer resp.Body.Close()
+
+		// 检查状态码
+		statusOK := true
+		if len(allowedStatuses) > 0 {
+			statusOK = false
+			for _, s := range allowedStatuses {
+				if resp.StatusCode == s {
+					statusOK = true
+					break
+				}
+			}
+		} else if resp.StatusCode >= 400 {
+			statusOK = false
+		}
+
 		if !statusOK {
 			body, _ := io.ReadAll(resp.Body)
-			return resp, fmt.Errorf("http: %s %s returned %d: %s", req.Method, req.URL.String(), resp.StatusCode, string(body))
+			lastErr = fmt.Errorf("http: %s %s returned %d: %s", req.Method, req.URL.String(), resp.StatusCode, string(body))
+
+			// 判断是否需要重试
+			if c.circuitBreaker != nil && c.options.Retry.shouldRetry(resp.StatusCode) {
+				c.circuitBreaker.OnFailure()
+				continue // 重试
+			}
+			if c.circuitBreaker != nil {
+				c.circuitBreaker.OnFailure()
+			}
+			return resp, lastErr
 		}
-	} else if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(resp.Body)
-		return resp, fmt.Errorf("http: %s %s returned %d: %s", req.Method, req.URL.String(), resp.StatusCode, string(body))
+
+		// 成功
+		if c.circuitBreaker != nil {
+			c.circuitBreaker.OnSuccess()
+		}
+
+		if result != nil {
+			if err := json.NewDecoder(resp.Body).Decode(result); err != nil {
+				return resp, fmt.Errorf("http: decode response from %s %s failed: %w", req.Method, req.URL.String(), err)
+			}
+		}
+		return resp, nil
 	}
 
-	if result != nil {
-		if err := json.NewDecoder(resp.Body).Decode(result); err != nil {
-			return resp, fmt.Errorf("http: decode response from %s %s failed: %w", req.Method, req.URL.String(), err)
-		}
-	}
-	return resp, nil
+	// 重试用完仍失败
+	return nil, lastErr
 }
 
 // ---------- 公开方法 ----------
