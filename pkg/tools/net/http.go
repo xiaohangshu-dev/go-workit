@@ -5,11 +5,16 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"time"
 )
 
-// Get 发送GET请求
+var defaultClient = &http.Client{
+	Timeout: 30 * time.Second,
+}
+
+// Get 发送GET请求，30秒超时
 func Get(url string) ([]byte, error) {
-	resp, err := http.Get(url)
+	resp, err := defaultClient.Get(url)
 	if err != nil {
 		return nil, err
 	}
@@ -17,14 +22,14 @@ func Get(url string) ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
-// PostJSON 发送POST请求，发送JSON数据
+// PostJSON 发送POST请求，发送JSON数据，30秒超时
 func PostJSON(url string, data interface{}) ([]byte, error) {
 	jsonData, err := json.Marshal(data)
 	if err != nil {
 		return nil, err
 	}
 
-	resp, err := http.Post(url, "application/json", bytes.NewBuffer(jsonData))
+	resp, err := defaultClient.Post(url, "application/json", bytes.NewBuffer(jsonData))
 	if err != nil {
 		return nil, err
 	}

@@ -324,3 +324,63 @@ flowchart LR
     E[文档国际化] --> F[英文文档补充]
     G[功能扩展] --> H[WebSocket/Cron/Migration]
 ```
+
+---
+
+## 八、第三轮分析（新增 12 项）
+
+### 8.1 包名与标准库冲突
+
+| 包 | 冲突 | 影响 |
+|-----|------|------|
+| [`pkg/tools/net/`](pkg/tools/net/http.go) | `net` ↔ `net/http` | 用户同时导入 `net/http` 和 `tools/net` 时 `net` 引用歧义 |
+| [`pkg/tools/math/`](pkg/tools/math/math.go) | `math` ↔ `math` | 导入 `tools/math` 后无法使用标准库 `math` |
+
+### 8.2 标准库简单包装，价值有限
+
+| 包 | 函数 | 对应标准库 |
+|-----|------|-----------|
+| `datetime` | `Now()`, `FormatDate()`, `ParseDate()` | `time.Now()`, `t.Format()`, `time.Parse()` |
+| `file` | `Exists()`, `ReadFile()`, `WriteFile()` | `os.Stat()`, `os.ReadFile()`, `os.WriteFile()` |
+| `math` | `Max()`, `Min()`, `Abs()`, `Round()`, `Sqrt()`, `Pow()` | `cmp` / `math` 包 |
+| `convert` | `ToString()`, `ToInt()`, `ToBool()` | `strconv` 包 |
+
+建议：这些包应标记为 deprecated 或移除，减少维护成本。
+
+### 8.3 安全漏洞
+
+| 位置 | 漏洞 |
+|------|------|
+| [`pkg/tools/zip/zip.go:66`](pkg/tools/zip/zip.go:66) | **Zip Slip**：`filepath.Join(destDir, file.Name)` 未校验路径是否超出 `destDir`，恶意 zip 可写入任意路径 |
+
+### 8.4 组件生命周期缺失（3 个组件）
+
+| 组件 | 问题 |
+|------|------|
+| [`miniox`](pkg/components/miniox/minio.go) | 无 `OnStop` 关闭 client；`panic` 而非返回 error |
+| [`elasticx`](pkg/components/elasticx/elasticx.go) | 无 `OnStop` 关闭 client；`panic` 而非返回 error；`Options.Func` 字段名不清晰 |
+| [`elasticsearchx`](pkg/components/elasticsearchx/elasticsearch.go) | 无 `OnStop` 关闭 client；`panic` 而非返回 error |
+
+### 8.5 Snowflake ID 生成器
+
+| 问题 | 位置 |
+|------|------|
+| 参数命名 `workerId` 不符合 Go 惯例 | [`pkg/tools/id/snowflake.go:15`](pkg/tools/id/snowflake.go:15) |
+| 未处理时钟回拨（clock rollback） | `snowflake.go` |
+| 无 `WorkerId` 边界校验（应限制 0-4095） | `snowflake.go` |
+
+### 8.6 应用生命周期控制薄弱
+
+| 问题 | 位置 |
+|------|------|
+| `Run()` 使用 `fxapp.Run()` 阻塞，无法外部控制启停 | [`pkg/app/application.go:121-125`](pkg/app/application.go:121) |
+| `AppendContainer`/`Container`/`FxApp` 暴露内部容器实现 | [`pkg/app/application.go:128-136`](pkg/app/application.go:128) |
+
+### 8.7 其他代码问题
+
+| 位置 | 问题 |
+|------|------|
+| [`pkg/tools/math/math.go:59`](pkg/tools/math/math.go:59) | `RandomInt` 使用 `math/rand` 默认源，Go 1.20+ 需显式 Seeds |
+| [`pkg/tools/net/http.go`](pkg/tools/net/http.go) | `Get`/`PostJSON` 无超时设置，可能 goroutine 泄漏 |
+| [`internal/service1/webapi/hello.go:15`](internal/service1/webapi/hello.go:15) | 硬编码 `WithAllowAnonymous()`，与鉴权设计矛盾 |
+| [`go.mod`](go.mod) | 同时依赖 `goccy/go-json` + `bytedance/sonic` 两个 JSON 库 |

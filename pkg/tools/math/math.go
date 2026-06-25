@@ -3,6 +3,7 @@ package math
 import (
 	"math"
 	"math/rand"
+	"time"
 )
 
 // 返回两个整数中的最大值
@@ -58,4 +59,9 @@ func Pow(base, exp float64) float64 {
 // 生成随机整数
 func RandomInt(min, max int) int {
 	return min + rand.Intn(max-min+1)
+}
+
+// init 初始化随机数种子
+func init() {
+	rand.Seed(time.Now().UnixNano())
 }
