@@ -310,7 +310,7 @@ func (a *WebApplication) useObservability() {
 	}
 }
 
-// MapMetrics 映射 Prometheus 指标端点。
+// MapMetrics 映射 Prometheus 指标端点，使用标准 promhttp handler。
 func (a *WebApplication) MapMetrics(path ...string) web.Application {
 	metrics := a.observability
 	if metrics == nil {
@@ -318,9 +318,9 @@ func (a *WebApplication) MapMetrics(path ...string) web.Application {
 	}
 
 	routePath := firstPath(metrics.Options().Metrics.Path, path...)
+	handler := metrics.PrometheusHandler()
 	a.engine().GET(routePath, func(c *gin.Context) {
-		c.Header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
-		c.String(http.StatusOK, metrics.PrometheusText())
+		handler.ServeHTTP(c.Writer, c.Request)
 	}).WithAllowAnonymous()
 	return a
 }

@@ -1,0 +1,6 @@
+app:
+  name: ddd-example
+
+log:
+  level: info
+  console: true

@@ -1,26 +1,13 @@
 package ddd
 
-import (
-	"reflect"
-)
-
-// IValueObject 指对象具有的能力
+// IValueObject 值对象接口，值对象通过其属性值来定义相等性。
 type IValueObject interface {
-	Equal(IValueObject) bool
+	// Equal 比较两个值对象是否相等
+	Equal(other IValueObject) bool
 }
 
-// 值对象
+// ValueObject 值对象基类，嵌入此类型表示该结构体是一个值对象。
+// 注意：Go 的嵌入类型无法访问外层结构体的字段，
+// 因此 Equal 方法需要在具体的值对象类型中自行实现。
+// 此基类仅作为标记，表明该类型是一个值对象。
 type ValueObject struct{}
-
-// Equals 方法用于动态比较两个值对象是否相等
-func (vo ValueObject) Equal(other IValueObject) bool {
-	otherValue := reflect.ValueOf(other)
-
-	if otherValue.Kind() != reflect.Ptr || otherValue.IsNil() {
-		return false
-	}
-
-	otherValue = otherValue.Elem()
-
-	return reflect.DeepEqual(vo, otherValue.Interface())
-}

@@ -1,34 +1,42 @@
 package observability
 
 import (
-	"fmt"
-	"runtime"
-	"sort"
+	"net/http"
+	"strconv"
 	"strings"
-	"sync"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/prometheus/common/expfmt"
 )
 
-type httpMetricKey struct {
-	Method string
-	Route  string
-	Status int
+// httpLabels 返回 Prometheus 标签名列表（按固定顺序）
+func httpLabelNames() []string {
+	return []string{"method", "route", "status"}
 }
 
-type httpMetricValue struct {
-	Count   int64
-	Sum     float64
-	Buckets []int64
+func statusString(status int) string {
+	return strconv.Itoa(status)
 }
 
 // Metrics 保存框架内置可观测性指标。
+// 使用 Prometheus client_golang 作为标准指标库。
 type Metrics struct {
-	options  *Options
-	start    time.Time
-	mu       sync.RWMutex
-	http     map[httpMetricKey]*httpMetricValue
-	inFlight int64
-	panics   int64
+	options   *Options
+	start     time.Time
+	namespace string
+
+	// Prometheus 指标
+	httpRequestsTotal *prometheus.CounterVec
+	httpDuration      *prometheus.HistogramVec
+	inFlightGauge     prometheus.Gauge
+	panicsCounter     prometheus.Counter
+	uptimeGauge       prometheus.GaugeFunc
+
+	registry *prometheus.Registry
+	handler  http.Handler
 }
 
 // NewMetrics 创建可观测性指标存储。
@@ -37,11 +45,99 @@ func NewMetrics(options *Options) *Metrics {
 		options = NewOptions()
 	}
 	options.normalize()
-	return &Metrics{
-		options: options,
-		start:   time.Now(),
-		http:    make(map[httpMetricKey]*httpMetricValue),
+
+	ns := sanitizeNamespace(options.Metrics.Namespace)
+	reg := prometheus.NewRegistry()
+
+	m := &Metrics{
+		options:   options,
+		start:     time.Now(),
+		namespace: ns,
+		registry:  reg,
 	}
+
+	// 注册 HTTP 请求计数器
+	m.httpRequestsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: ns,
+			Name:      "http_requests_total",
+			Help:      "Total number of HTTP requests.",
+		},
+		httpLabelNames(),
+	)
+	reg.MustRegister(m.httpRequestsTotal)
+
+	// 注册 HTTP 请求耗时直方图
+	m.httpDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: ns,
+			Name:      "http_request_duration_seconds",
+			Help:      "HTTP request duration in seconds.",
+			Buckets:   durationsToFloat(options.Metrics.Buckets),
+		},
+		httpLabelNames(),
+	)
+	reg.MustRegister(m.httpDuration)
+
+	// 注册处理中的请求数
+	m.inFlightGauge = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: ns,
+		Name:      "http_in_flight_requests",
+		Help:      "Current number of in-flight HTTP requests.",
+	})
+	reg.MustRegister(m.inFlightGauge)
+
+	// 注册 Panic 计数器
+	m.panicsCounter = prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: ns,
+		Name:      "panics_total",
+		Help:      "Total number of recovered panics.",
+	})
+	reg.MustRegister(m.panicsCounter)
+
+	// 注册运行时长
+	m.uptimeGauge = prometheus.NewGaugeFunc(
+		prometheus.GaugeOpts{
+			Namespace: ns,
+			Name:      "uptime_seconds",
+			Help:      "Application uptime in seconds.",
+		},
+		func() float64 { return time.Since(m.start).Seconds() },
+	)
+	reg.MustRegister(m.uptimeGauge)
+
+	// 可选：添加 Go 运行时指标
+	if options.Metrics.IncludeRuntime {
+		reg.MustRegister(collectors.NewGoCollector())
+		reg.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{
+			Namespace: ns,
+		}))
+	}
+
+	// 创建 HTTP handler
+	m.handler = promhttp.HandlerFor(reg, promhttp.HandlerOpts{
+		Registry: reg,
+	})
+
+	return m
+}
+
+// durationsToFloat 将 time.Duration 切片转换为 float64 切片（单位：秒）
+func durationsToFloat(buckets []time.Duration) []float64 {
+	result := make([]float64, len(buckets))
+	for i, d := range buckets {
+		result[i] = d.Seconds()
+	}
+	return result
+}
+
+// sanitizeNamespace 清理命名空间，确保符合 Prometheus 命名规范
+func sanitizeNamespace(ns string) string {
+	ns = strings.NewReplacer("-", "_", ".", "_", " ", "_").Replace(ns)
+	if len(ns) > 0 && ns[len(ns)-1] == '_' {
+		ns = ns[:len(ns)-1]
+	}
+	return ns
 }
 
 // Options 返回指标配置。
@@ -51,25 +147,17 @@ func (m *Metrics) Options() *Options {
 
 // IncInFlight 记录正在处理的请求数。
 func (m *Metrics) IncInFlight() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.inFlight++
+	m.inFlightGauge.Inc()
 }
 
 // DecInFlight 释放正在处理的请求数。
 func (m *Metrics) DecInFlight() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.inFlight > 0 {
-		m.inFlight--
-	}
+	m.inFlightGauge.Dec()
 }
 
 // IncPanic 记录一次 panic。
 func (m *Metrics) IncPanic() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.panics++
+	m.panicsCounter.Inc()
 }
 
 // RecordHTTPRequest 记录一次 HTTP 请求。
@@ -77,138 +165,33 @@ func (m *Metrics) RecordHTTPRequest(method, route string, status int, duration t
 	if route == "" {
 		route = "unknown"
 	}
-	key := httpMetricKey{
-		Method: method,
-		Route:  route,
-		Status: status,
+	labels := prometheus.Labels{
+		"method": method,
+		"route":  route,
+		"status": statusString(status),
 	}
-	seconds := duration.Seconds()
-
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	value, ok := m.http[key]
-	if !ok {
-		value = &httpMetricValue{
-			Buckets: make([]int64, len(m.options.Metrics.Buckets)),
-		}
-		m.http[key] = value
-	}
-
-	value.Count++
-	value.Sum += seconds
-	for i, bucket := range m.options.Metrics.Buckets {
-		if duration <= bucket {
-			value.Buckets[i]++
-		}
-	}
+	m.httpRequestsTotal.With(labels).Inc()
+	m.httpDuration.With(labels).Observe(duration.Seconds())
 }
 
-// PrometheusText 导出 Prometheus text exposition 格式。
+// PrometheusText 返回 Prometheus text exposition 格式的指标数据。
 func (m *Metrics) PrometheusText() string {
-	m.mu.RLock()
-	httpSnapshot := make(map[httpMetricKey]httpMetricValue, len(m.http))
-	for k, v := range m.http {
-		httpSnapshot[k] = httpMetricValue{
-			Count:   v.Count,
-			Sum:     v.Sum,
-			Buckets: append([]int64(nil), v.Buckets...),
-		}
+	families, err := m.registry.Gather()
+	if err != nil {
+		return "# error gathering metrics: " + err.Error() + "\n"
 	}
-	inFlight := m.inFlight
-	panics := m.panics
-	uptime := time.Since(m.start).Seconds()
-	m.mu.RUnlock()
 
 	var b strings.Builder
-	ns := m.options.Metrics.Namespace
-
-	fmt.Fprintf(&b, "# HELP %s_uptime_seconds Application uptime in seconds.\n", ns)
-	fmt.Fprintf(&b, "# TYPE %s_uptime_seconds gauge\n", ns)
-	fmt.Fprintf(&b, "%s_uptime_seconds %.3f\n", ns, uptime)
-
-	fmt.Fprintf(&b, "# HELP %s_http_in_flight_requests Current in-flight HTTP requests.\n", ns)
-	fmt.Fprintf(&b, "# TYPE %s_http_in_flight_requests gauge\n", ns)
-	fmt.Fprintf(&b, "%s_http_in_flight_requests %d\n", ns, inFlight)
-
-	fmt.Fprintf(&b, "# HELP %s_panics_total Total recovered panics.\n", ns)
-	fmt.Fprintf(&b, "# TYPE %s_panics_total counter\n", ns)
-	fmt.Fprintf(&b, "%s_panics_total %d\n", ns, panics)
-
-	keys := make([]httpMetricKey, 0, len(httpSnapshot))
-	for key := range httpSnapshot {
-		keys = append(keys, key)
-	}
-	sort.Slice(keys, func(i, j int) bool {
-		if keys[i].Route != keys[j].Route {
-			return keys[i].Route < keys[j].Route
+	for _, f := range families {
+		_, err := expfmt.MetricFamilyToText(&b, f)
+		if err != nil {
+			return "# error writing metric: " + err.Error() + "\n"
 		}
-		if keys[i].Method != keys[j].Method {
-			return keys[i].Method < keys[j].Method
-		}
-		return keys[i].Status < keys[j].Status
-	})
-
-	fmt.Fprintf(&b, "# HELP %s_http_requests_total Total HTTP requests.\n", ns)
-	fmt.Fprintf(&b, "# TYPE %s_http_requests_total counter\n", ns)
-	for _, key := range keys {
-		value := httpSnapshot[key]
-		fmt.Fprintf(&b, "%s_http_requests_total{%s} %d\n", ns, httpLabels(key), value.Count)
 	}
-
-	fmt.Fprintf(&b, "# HELP %s_http_request_duration_seconds HTTP request duration in seconds.\n", ns)
-	fmt.Fprintf(&b, "# TYPE %s_http_request_duration_seconds histogram\n", ns)
-	for _, key := range keys {
-		value := httpSnapshot[key]
-		for i, bucket := range m.options.Metrics.Buckets {
-			fmt.Fprintf(&b, "%s_http_request_duration_seconds_bucket{%s,le=\"%.3f\"} %d\n",
-				ns, httpLabels(key), bucket.Seconds(), value.Buckets[i])
-		}
-		fmt.Fprintf(&b, "%s_http_request_duration_seconds_bucket{%s,le=\"+Inf\"} %d\n",
-			ns, httpLabels(key), value.Count)
-		fmt.Fprintf(&b, "%s_http_request_duration_seconds_sum{%s} %.6f\n", ns, httpLabels(key), value.Sum)
-		fmt.Fprintf(&b, "%s_http_request_duration_seconds_count{%s} %d\n", ns, httpLabels(key), value.Count)
-	}
-
-	if m.options.Metrics.IncludeRuntime {
-		appendRuntimeMetrics(&b, ns)
-	}
-
 	return b.String()
 }
 
-func httpLabels(key httpMetricKey) string {
-	return fmt.Sprintf("method=\"%s\",route=\"%s\",status=\"%d\"",
-		escapeLabelValue(key.Method),
-		escapeLabelValue(key.Route),
-		key.Status,
-	)
-}
-
-func escapeLabelValue(value string) string {
-	value = strings.ReplaceAll(value, "\\", "\\\\")
-	value = strings.ReplaceAll(value, "\n", "\\n")
-	value = strings.ReplaceAll(value, "\"", "\\\"")
-	return value
-}
-
-func appendRuntimeMetrics(b *strings.Builder, namespace string) {
-	var stats runtime.MemStats
-	runtime.ReadMemStats(&stats)
-
-	fmt.Fprintf(b, "# HELP %s_runtime_goroutines Current goroutine count.\n", namespace)
-	fmt.Fprintf(b, "# TYPE %s_runtime_goroutines gauge\n", namespace)
-	fmt.Fprintf(b, "%s_runtime_goroutines %d\n", namespace, runtime.NumGoroutine())
-
-	fmt.Fprintf(b, "# HELP %s_runtime_alloc_bytes Current heap allocation bytes.\n", namespace)
-	fmt.Fprintf(b, "# TYPE %s_runtime_alloc_bytes gauge\n", namespace)
-	fmt.Fprintf(b, "%s_runtime_alloc_bytes %d\n", namespace, stats.Alloc)
-
-	fmt.Fprintf(b, "# HELP %s_runtime_sys_bytes Total bytes obtained from the OS.\n", namespace)
-	fmt.Fprintf(b, "# TYPE %s_runtime_sys_bytes gauge\n", namespace)
-	fmt.Fprintf(b, "%s_runtime_sys_bytes %d\n", namespace, stats.Sys)
-
-	fmt.Fprintf(b, "# HELP %s_runtime_gc_total Total completed GC cycles.\n", namespace)
-	fmt.Fprintf(b, "# TYPE %s_runtime_gc_total counter\n", namespace)
-	fmt.Fprintf(b, "%s_runtime_gc_total %d\n", namespace, stats.NumGC)
+// PrometheusHandler 返回标准的 Prometheus HTTP handler，可用于挂载到路由上。
+func (m *Metrics) PrometheusHandler() http.Handler {
+	return m.handler
 }

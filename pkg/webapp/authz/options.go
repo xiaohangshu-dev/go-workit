@@ -7,7 +7,7 @@ import (
 // Options 表示授权选项配置
 type Options struct {
 	DefaultPolicy string
-	policys       map[string]func(*web.ClaimsPrincipal) bool
+	policies      map[string]func(*web.ClaimsPrincipal) bool
 }
 
 // NewOptions 创建一个新的 Options 实例
@@ -15,7 +15,7 @@ func NewOptions() *Options {
 
 	opts := &Options{
 		DefaultPolicy: "",
-		policys:       make(map[string]func(*web.ClaimsPrincipal) bool),
+		policies:      make(map[string]func(*web.ClaimsPrincipal) bool),
 	}
 
 	return opts
@@ -25,11 +25,11 @@ func NewOptions() *Options {
 func (o *Options) AddPolicy(policyName string, policy func(*web.ClaimsPrincipal) bool) *Options {
 
 	// 检查是否已存在同名策略
-	if _, exists := o.policys[policyName]; exists {
+	if _, exists := o.policies[policyName]; exists {
 		panic("policy with name " + policyName + " already exists")
 	}
 
-	o.policys[policyName] = policy
+	o.policies[policyName] = policy
 	return o
 }
 
@@ -37,12 +37,12 @@ func (o *Options) AddPolicy(policyName string, policy func(*web.ClaimsPrincipal)
 func (o *Options) Policies(policyName ...string) map[string]func(*web.ClaimsPrincipal) bool {
 
 	if len(policyName) == 0 {
-		return o.policys
+		return o.policies
 	}
 
 	policies := make(map[string]func(*web.ClaimsPrincipal) bool)
 	for _, n := range policyName {
-		if policy, exists := o.policys[n]; exists {
+		if policy, exists := o.policies[n]; exists {
 			policies[n] = policy
 		} else {
 			panic("policy with name " + n + " does not exist")
@@ -54,7 +54,7 @@ func (o *Options) Policies(policyName ...string) map[string]func(*web.ClaimsPrin
 
 // Policy 根据名称返回单个策略
 func (o *Options) Policy(policyName string) func(*web.ClaimsPrincipal) bool {
-	if policy, exists := o.policys[policyName]; exists {
+	if policy, exists := o.policies[policyName]; exists {
 		return policy
 	}
 	panic("policy with name " + policyName + " does not exist")

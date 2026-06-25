@@ -5,6 +5,7 @@ import (
 
 	"github.com/spf13/viper"
 	"github.com/xiaohangshu-dev/go-workit/pkg/config"
+	"github.com/xiaohangshu-dev/go-workit/pkg/ddd"
 	"go.uber.org/fx"
 )
 
@@ -108,4 +109,18 @@ func (b *ApplicationBuilder) ConfigureOptions(provider any) *ApplicationBuilder 
 // Config 返回配置实例,配置阶段也可读取配置
 func (b *ApplicationBuilder) Config() *viper.Viper {
 	return b.config
+}
+
+// AddDomainEventBus 注册领域事件总线。
+//
+// 参数为通过 ddd.RegisterDomainEventHandlers[T] 注册的事件处理器。
+// 由于 Go 语言限制，方法不能包含类型参数，因此事件类型在 RegisterDomainEventHandlers 中指定。
+//
+// 使用方式:
+//
+//	builder.AddDomainEventBus(
+//	    ddd.RegisterDomainEventHandlers[OrderCreated](NewOrderCreatedHandler),
+//	)
+func (b *ApplicationBuilder) AddDomainEventBus(eventHandlerRegistrations ...fx.Option) *ApplicationBuilder {
+	return b.AddServices(ddd.DomainEventBusModule(eventHandlerRegistrations...))
 }
