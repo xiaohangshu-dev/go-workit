@@ -1,0 +1,16 @@
+app:
+  name: workit-observability-example
+
+server:
+  http_port: 8081
+  grpc_port: 50051
+  environment: dev
+
+log:
+  level: info
+  filename: ./logs/app.log
+  max_size: 100
+  max_backups: 3
+  max_age: 7
+  compress: true
+  console: true

@@ -1,6 +1,7 @@
 package webapp
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/xiaohangshu-dev/go-workit/pkg/app"
@@ -13,6 +14,7 @@ import (
 	"github.com/xiaohangshu-dev/go-workit/pkg/webapp/kafkactx"
 	"github.com/xiaohangshu-dev/go-workit/pkg/webapp/minioctx"
 	"github.com/xiaohangshu-dev/go-workit/pkg/webapp/mongoctx"
+	"github.com/xiaohangshu-dev/go-workit/pkg/webapp/observability"
 	"github.com/xiaohangshu-dev/go-workit/pkg/webapp/redisctx"
 
 	"github.com/xiaohangshu-dev/go-workit/pkg/webapp/ginx"
@@ -28,13 +30,20 @@ import (
 // WebApplicationBuilder 构建web应用
 type WebApplicationBuilder struct {
 	*app.ApplicationBuilder
-	app           *app.Application
-	authOpts      *auth.Options
-	authzOpts     *authz.Options
-	localizaOpts  *localiza.Options
-	rateLimitOpts *ratelimit.Options
-	reqdecpOpts   *reqdecp.Options
-	router        *router.Router
+	app               *app.Application
+	authOpts          *auth.Options
+	authzOpts         *authz.Options
+	localizaOpts      *localiza.Options
+	rateLimitOpts     *ratelimit.Options
+	reqdecpOpts       *reqdecp.Options
+	observability     *observability.Metrics
+	health            *observability.HealthRegistry
+	telemetry         *observability.Telemetry
+	observabilityOpts *observability.Options
+	metricsEnabled    bool
+	tracingEnabled    bool
+	healthEnabled     bool
+	router            *router.Router
 }
 
 // NewWebAppBuilder 创建WebApplicationBuilder
@@ -215,6 +224,35 @@ func (b *WebApplicationBuilder) Build(fn ...func(b *WebApplicationBuilder) web.A
 	if b.reqdecpOpts == nil {
 		b.reqdecpOpts = reqdecp.NewOptions()
 	}
+	if b.observabilityOpts == nil {
+		b.observabilityOpts = observability.NewOptions()
+	}
+
+	if b.metricsEnabled {
+		b.observability = observability.NewMetrics(b.observabilityOpts)
+		b.app.AppendContainer(fx.Supply(b.observability))
+	}
+	if b.healthEnabled {
+		b.health = observability.NewHealthRegistry(b.observabilityOpts)
+		b.app.AppendContainer(fx.Supply(b.health))
+	}
+	if b.tracingEnabled {
+		telemetry, err := observability.NewTelemetry(context.Background(), b.observabilityOpts)
+		if err != nil {
+			panic(fmt.Errorf("build telemetry error: %w", err))
+		}
+		b.telemetry = telemetry
+		b.app.AppendContainer(
+			fx.Supply(b.telemetry),
+			fx.Invoke(func(lc fx.Lifecycle) {
+				lc.Append(fx.Hook{
+					OnStop: func(ctx context.Context) error {
+						return b.telemetry.Shutdown(ctx)
+					},
+				})
+			}),
+		)
+	}
 
 	// 构建国际化
 	if b.localizaOpts != nil {
@@ -247,7 +285,20 @@ func (b *WebApplicationBuilder) Build(fn ...func(b *WebApplicationBuilder) web.A
 		return fn[0](b)
 	}
 
-	return ginx.NewWebApplication(b.app)
+	return ginx.NewWebApplication(b.app, b.observability, b.health, b.telemetry)
+}
+
+func (b *WebApplicationBuilder) ensureObservabilityOptions() *observability.Options {
+	if b.observabilityOpts == nil {
+		b.observabilityOpts = observability.NewOptions()
+	}
+	if serviceName := b.Config().GetString("app.name"); serviceName != "" {
+		b.observabilityOpts.ServiceName = serviceName
+	}
+	if environment := b.Config().GetString("server.environment"); environment != "" {
+		b.observabilityOpts.Environment = environment
+	}
+	return b.observabilityOpts
 }
 
 // App 获取应用实例
@@ -258,4 +309,19 @@ func (b *WebApplicationBuilder) App() *app.Application {
 // Router 获取路由实例
 func (b *WebApplicationBuilder) Router() *router.Router {
 	return b.router
+}
+
+// Observability 获取可观测性指标存储。
+func (b *WebApplicationBuilder) Observability() *observability.Metrics {
+	return b.observability
+}
+
+// HealthChecks 获取健康检查注册表。
+func (b *WebApplicationBuilder) HealthChecks() *observability.HealthRegistry {
+	return b.health
+}
+
+// Telemetry 获取链路追踪上下文。
+func (b *WebApplicationBuilder) Telemetry() *observability.Telemetry {
+	return b.telemetry
 }

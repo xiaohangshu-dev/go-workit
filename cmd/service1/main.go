@@ -71,6 +71,9 @@ func main() {
 
 	app.UseAuthorization()
 
+	app.MapMetrics()
+	app.MapHealthChecks()
+
 	app.MapRoute(webapi.Hello)
 
 	app.Run()

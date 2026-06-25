@@ -17,6 +17,10 @@ type Application interface {
 	UseCORS(any) Application
 	UseStaticFiles(urlPath, root string) Application
 	UseHealthCheck() Application
+	MapMetrics(path ...string) Application
+	MapHealthChecks(path ...string) Application
+	MapReadinessChecks(path ...string) Application
+	MapLivenessChecks(path ...string) Application
 	UseAuthentication() Application
 	UseAuthorization() Application
 	UseRecovery() Application

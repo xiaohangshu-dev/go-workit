@@ -21,6 +21,9 @@ func NewBuilder() *ApplicationBuilder {
 	// 创建一个新的 viper 实例
 	viper := viper.New()
 
+	// 设置 app 默认值
+	viper.SetDefault("app.name", "go-workit")
+
 	// 设置 logger 默认值
 	viper.SetDefault("log.level", "info")              // 默认日志级别为 info
 	viper.SetDefault("log.filename", "./logs/app.log") // 默认不输出到文件

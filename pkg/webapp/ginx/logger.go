@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 )
 
@@ -33,6 +34,12 @@ func newZapLogger(logger *zap.Logger) gin.HandlerFunc {
 			zap.String("path", path),
 			zap.String("ip", clientIP),
 			zap.Duration("latency", latency),
+		}
+		if spanContext := trace.SpanContextFromContext(c.Request.Context()); spanContext.IsValid() {
+			fields = append(fields,
+				zap.String("trace_id", spanContext.TraceID().String()),
+				zap.String("span_id", spanContext.SpanID().String()),
+			)
 		}
 
 		switch {

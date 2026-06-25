@@ -17,7 +17,9 @@ import (
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 	"github.com/xiaohangshu-dev/go-workit/pkg/app"
+	"github.com/xiaohangshu-dev/go-workit/pkg/webapp/observability"
 	"github.com/xiaohangshu-dev/go-workit/pkg/webapp/web"
+	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
 	"go.uber.org/fx"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -32,11 +34,27 @@ type WebApplication struct {
 	server                  *http.Server
 	ServerOptions           *web.ServerConfig
 	env                     *web.Environment
+	observability           *observability.Metrics
+	health                  *observability.HealthRegistry
+	telemetry               *observability.Telemetry
 }
 
 // NewWebApplication 创建一个 WebApplication 实例
-func NewWebApplication(app *app.Application) web.Application {
+func NewWebApplication(app *app.Application, components ...any) web.Application {
 	serverOptions := &web.ServerConfig{}
+	var observabilityMetrics *observability.Metrics
+	var healthRegistry *observability.HealthRegistry
+	var telemetry *observability.Telemetry
+	for _, component := range components {
+		switch value := component.(type) {
+		case *observability.Metrics:
+			observabilityMetrics = value
+		case *observability.HealthRegistry:
+			healthRegistry = value
+		case *observability.Telemetry:
+			telemetry = value
+		}
+	}
 
 	// 1. http_port 默认 8080
 	httpPort := app.Config().GetInt("server.http_port")
@@ -91,7 +109,7 @@ func NewWebApplication(app *app.Application) web.Application {
 	if serverOptions.UseDefaultRecover = !app.Config().IsSet("server.use_default_recover") ||
 		app.Config().GetBool("server.use_default_recover"); serverOptions.UseDefaultRecover {
 
-		e.Use(newRecoveryWithZap(app.Logger()))
+		e.Use(newRecoveryWithZap(app.Logger(), observabilityMetrics))
 	}
 
 	// 6. logger 默认启用（除非明确配置为 false）
@@ -101,12 +119,17 @@ func NewWebApplication(app *app.Application) web.Application {
 		e.Use(newZapLogger(app.Logger()))
 	}
 
-	return &WebApplication{
+	webapp := &WebApplication{
 		handler:       e,
 		ServerOptions: serverOptions,
 		env:           env,
 		Application:   app,
+		observability: observabilityMetrics,
+		health:        healthRegistry,
+		telemetry:     telemetry,
 	}
+	webapp.useObservability()
+	return webapp
 }
 
 // Run 启动 Web 应用程序
@@ -275,6 +298,99 @@ func (a *WebApplication) UseHealthCheck() web.Application {
 		c.JSON(200, gin.H{"status": "ok"})
 	})
 	return a
+}
+
+func (a *WebApplication) useObservability() {
+	if a.telemetry != nil && a.telemetry.Enabled() {
+		a.engine().Use(otelgin.Middleware(a.telemetry.Options().ServiceName))
+	}
+
+	if a.observability != nil {
+		a.engine().Use(newObservability(a.observability).Handle())
+	}
+}
+
+// MapMetrics 映射 Prometheus 指标端点。
+func (a *WebApplication) MapMetrics(path ...string) web.Application {
+	metrics := a.observability
+	if metrics == nil {
+		return a
+	}
+
+	routePath := firstPath(metrics.Options().Metrics.Path, path...)
+	a.engine().GET(routePath, func(c *gin.Context) {
+		c.Header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+		c.String(http.StatusOK, metrics.PrometheusText())
+	}).WithAllowAnonymous()
+	return a
+}
+
+// MapHealthChecks 映射健康检查端点，包含完整检查、就绪检查和存活检查。
+func (a *WebApplication) MapHealthChecks(path ...string) web.Application {
+	health := a.health
+	if health == nil {
+		return a
+	}
+
+	a.mapHealthEndpoint(firstPath(health.Options().Health.HealthPath, path...), func(c *gin.Context) {
+		report := health.Run(c.Request.Context())
+		c.JSON(healthStatusCode(report.Status), report)
+	})
+	a.mapHealthEndpoint(health.Options().Health.ReadinessPath, func(c *gin.Context) {
+		report := health.Readiness(c.Request.Context())
+		c.JSON(healthStatusCode(report.Status), report)
+	})
+	a.mapHealthEndpoint(health.Options().Health.LivenessPath, func(c *gin.Context) {
+		report := health.Liveness(c.Request.Context())
+		c.JSON(healthStatusCode(report.Status), report)
+	})
+	return a
+}
+
+// MapReadinessChecks 映射就绪检查端点。
+func (a *WebApplication) MapReadinessChecks(path ...string) web.Application {
+	health := a.health
+	if health == nil {
+		return a
+	}
+
+	a.mapHealthEndpoint(firstPath(health.Options().Health.ReadinessPath, path...), func(c *gin.Context) {
+		report := health.Readiness(c.Request.Context())
+		c.JSON(healthStatusCode(report.Status), report)
+	})
+	return a
+}
+
+// MapLivenessChecks 映射存活检查端点。
+func (a *WebApplication) MapLivenessChecks(path ...string) web.Application {
+	health := a.health
+	if health == nil {
+		return a
+	}
+
+	a.mapHealthEndpoint(firstPath(health.Options().Health.LivenessPath, path...), func(c *gin.Context) {
+		report := health.Liveness(c.Request.Context())
+		c.JSON(healthStatusCode(report.Status), report)
+	})
+	return a
+}
+
+func (a *WebApplication) mapHealthEndpoint(path string, handler gin.HandlerFunc) {
+	a.engine().GET(path, handler).WithAllowAnonymous()
+}
+
+func firstPath(defaultPath string, paths ...string) string {
+	if len(paths) > 0 && paths[0] != "" {
+		return paths[0]
+	}
+	return defaultPath
+}
+
+func healthStatusCode(status observability.HealthStatus) int {
+	if status == observability.HealthStatusUnhealthy {
+		return http.StatusServiceUnavailable
+	}
+	return http.StatusOK
 }
 
 func (a *WebApplication) engine() *gin.Engine {

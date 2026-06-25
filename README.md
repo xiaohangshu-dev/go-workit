@@ -94,9 +94,70 @@ func main() {
 }
 ```
 
+#### 可观测性
+
+框架内置企业级可观测性入口：`builder.Add...` 注册能力，框架自动挂载 HTTP 指标和链路追踪中间件，`app.Map...` 映射端点。
+
+- `GET /metrics`：Prometheus text exposition 格式指标
+- `GET /live`：存活检查
+- `GET /ready`：就绪检查
+- `GET /health`：完整健康检查结果
+
+HTTP 请求会自动记录请求数、耗时、in-flight、panic 和 Go runtime 指标；启用 tracing 后会通过 OpenTelemetry 生成 HTTP span，并在请求日志中自动附加 `trace_id`、`span_id`。
+
+```go
+import (
+	"context"
+
+	"github.com/xiaohangshu-dev/go-workit/pkg/webapp/observability"
+)
+
+builder.AddMetrics(func(options *observability.MetricsOptions) {
+	options.Namespace = "service1"
+	options.Path = "/metrics"
+})
+
+builder.AddOpenTelemetry(func(options *observability.TracingOptions) {
+	options.Exporter = observability.TraceExporterOTLPGRPC
+	options.Endpoint = "otel-collector:4317"
+	options.Insecure = true
+	options.SampleRatio = 0.1
+})
+
+builder.AddHealthChecks().
+	AddCheck("database", func(ctx context.Context) observability.CheckResult {
+		return observability.Healthy("database is reachable")
+	}, "ready")
+
+app := builder.Build()
+app.MapMetrics()
+app.MapHealthChecks()
+```
+
+本地开发时可以使用 stdout exporter，不需要先启动 OpenTelemetry Collector：
+
+```go
+builder.AddOpenTelemetry(func(options *observability.TracingOptions) {
+	options.Exporter = observability.TraceExporterStdout
+})
+```
+
+也可以直接运行样例：
+
+```bash
+go run ./examples/observability
+curl http://localhost:8081/hello
+curl http://localhost:8081/slow
+curl http://localhost:8081/ready
+curl http://localhost:8081/metrics
+```
+
 #### 配置文件示例 (application.yaml)
 
 ```yaml
+app:
+  name: service1
+
 server:
   http_port: 8080
   grpc_port: 50051
