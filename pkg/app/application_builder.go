@@ -6,6 +6,7 @@ import (
 	"github.com/spf13/viper"
 	"github.com/xiaohangshu-dev/go-workit/pkg/config"
 	"github.com/xiaohangshu-dev/go-workit/pkg/ddd"
+	httpclient "github.com/xiaohangshu-dev/go-workit/pkg/tools/net"
 	"go.uber.org/fx"
 )
 
@@ -50,7 +51,7 @@ func NewBuilder() *ApplicationBuilder {
 
 	return &ApplicationBuilder{
 		config:        viper,
-		options:       make([]fx.Option, 0),
+		options:       []fx.Option{fx.Provide(httpclient.NewProvider)},
 		configBuilder: configBuilder,
 	}
 }
@@ -112,15 +113,59 @@ func (b *ApplicationBuilder) Config() *viper.Viper {
 }
 
 // AddDomainEventBus 注册领域事件总线。
-//
-// 参数为通过 ddd.RegisterDomainEventHandlers[T] 注册的事件处理器。
-// 由于 Go 语言限制，方法不能包含类型参数，因此事件类型在 RegisterDomainEventHandlers 中指定。
-//
-// 使用方式:
-//
-//	builder.AddDomainEventBus(
-//	    ddd.RegisterDomainEventHandlers[OrderCreated](NewOrderCreatedHandler),
-//	)
 func (b *ApplicationBuilder) AddDomainEventBus(eventHandlerRegistrations ...fx.Option) *ApplicationBuilder {
 	return b.AddServices(ddd.DomainEventBusModule(eventHandlerRegistrations...))
+}
+
+// AddHttpClient 注册默认 HTTP 客户端。
+//
+// 使用后可通过 DI 直接注入 *httpclient.Client，适用于只请求一个外部服务的场景。
+//
+//	type UserService struct {
+//	    Client *httpclient.Client  // 框架自动注入
+//	}
+//
+//	client.Get(ctx, "/users", &users)
+//	client.Post(ctx, "/users", body, &result)
+func (b *ApplicationBuilder) AddHttpClient(configure func(options *httpclient.Options)) *ApplicationBuilder {
+	opts := httpclient.NewOptions()
+	if configure != nil {
+		configure(opts)
+	}
+	client := httpclient.NewClient(opts)
+	b.options = append(b.options,
+		fx.Provide(func() *httpclient.Client { return client }),
+		fx.Invoke(func(p *httpclient.Provider) { p.Add("", client) }),
+	)
+	return b
+}
+
+// AddNamedHttpClient 注册命名 HTTP 客户端。
+//
+// 适用于请求多个不同外部服务的场景。通过 *httpclient.Provider 获取指定名称的客户端。
+//
+//	builder.AddNamedHttpClient("github", func(options *httpclient.Options) {
+//	    options.BaseURL = "https://api.github.com"
+//	})
+//	builder.AddNamedHttpClient("openai", func(options *httpclient.Options) {
+//	    options.BaseURL = "https://api.openai.com"
+//	})
+//
+//	type ApiService struct {
+//	    Clients *httpclient.Provider  // 框架自动注入
+//	}
+//	func (s *ApiService) DoWork() {
+//	    s.Clients.Get("github").Get(ctx, "/users", &result)
+//	    s.Clients.Get("openai").Post(ctx, "/chat", body, &result)
+//	}
+func (b *ApplicationBuilder) AddNamedHttpClient(name string, configure func(options *httpclient.Options)) *ApplicationBuilder {
+	opts := httpclient.NewOptions()
+	if configure != nil {
+		configure(opts)
+	}
+	client := httpclient.NewClient(opts)
+	b.options = append(b.options,
+		fx.Invoke(func(p *httpclient.Provider) { p.Add(name, client) }),
+	)
+	return b
 }
