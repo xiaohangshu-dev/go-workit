@@ -16,22 +16,21 @@ func Hello(
 
 	// 创建路由
 
-	group.GET("", HelloNewb(log))
-	group.POST("", HelloNewb(log))
+	group.GET("", hello(log))
+	group.POST("", hello(log))
 }
 
-// HelloNewb godoc
+// hello godoc
 // @Summary hello workit
-// @Description 返回 "你好 小航书"
+// @Description 返回 "你好,小航"
 // @Tags Hello
 // @Accept json
 // @Produce json
 // @Success 200 {object} api.Response[string]
 // @Router /hello [get]
-// @Security BearerAuth
-func HelloNewb(log *zap.Logger) gin.HandlerFunc {
+func hello(log *zap.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		data := response.Success("你好,小航书")
+		data := response.Success("你好,小航")
 		c.JSON(200, data)
 	}
 }

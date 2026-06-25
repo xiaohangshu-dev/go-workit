@@ -190,14 +190,6 @@ func (webapp *WebApplication) Run(params ...string) {
 			}),
 		)
 
-		// 注册 gRPC 服务
-		for _, constructor := range webapp.grpcServiceConstructors {
-			webapp.AppendContainer(fx.Provide(constructor))
-			constructorType := reflect.TypeOf(constructor)
-			serviceType := constructorType.Out(0)
-			invokeFn := makeGrpcInvoke(serviceType, webapp.Logger())
-			webapp.AppendContainer(fx.Invoke(invokeFn))
-		}
 	}
 
 	// 注册 HTTP 路由

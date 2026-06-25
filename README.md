@@ -46,8 +46,14 @@ go-workit 是一个现代化的 Go 开发框架，提供了完整的应用开发
 ### 安装
 
 ```bash
-go get github.com/xiaohangshuhub/go-workit
+go get github.com/xiaohangshu-dev/go-workit
 ```
+
+> 当前 Web 路由扩展依赖 `github.com/xiaohangshu-dev/gin` fork。由于 Go module 的 `replace` 不会传递给下游项目，使用本框架的应用需要在自己的 `go.mod` 中显式添加：
+>
+> ```go
+> replace github.com/gin-gonic/gin => github.com/xiaohangshu-dev/gin v0.0.0-20251127022746-130901f68014
+> ```
 
 ### 基本使用
 
@@ -57,7 +63,10 @@ go get github.com/xiaohangshuhub/go-workit
 package main
 
 import (
-	"github.com/xiaohangshuhub/go-workit/pkg/webapp"
+	"github.com/gin-gonic/gin"
+	"github.com/xiaohangshu-dev/go-workit/pkg/db/mysqlx"
+	"github.com/xiaohangshu-dev/go-workit/pkg/webapp"
+	"github.com/xiaohangshu-dev/go-workit/pkg/webapp/dbctx"
 )
 
 func main() {
@@ -65,26 +74,17 @@ func main() {
 	builder := webapp.NewBuilder()
 
 	// 添加数据库配置
-	builder.AddDbContext(func(options *webapp.DbContextOptions) {
-		options.UseMySQL("default", func(config *webapp.MySQLConfig) {
-			config.Dsn = "user:password@tcp(127.0.0.1:3306)/dbname?charset=utf8mb4&parseTime=True&loc=Local"
-		})
-	})
-
-	// 添加缓存配置
-	builder.AddCacheContext(func(options *webapp.CacheContextOptions) {
-		options.UseRedis("default", func(config *webapp.RedisConfig) {
-			config.Addr = "127.0.0.1:6379"
-			config.Password = ""
-			config.DB = 0
+	builder.AddDbContext(func(options *dbctx.Options) {
+		options.UseMySQL("default", func(config *mysqlx.Options) {
+			config.DSN = "user:password@tcp(127.0.0.1:3306)/dbname?charset=utf8mb4&parseTime=True&loc=Local"
 		})
 	})
 
 	// 构建并运行应用
 	app := builder.Build()
-	app.MapRoute(func(router *webapp.Router) {
-		router.GET("/", func(c *webapp.Context) {
-			c.JSON(200, webapp.H{
+	app.MapRoute(func(router *gin.Engine) {
+		router.GET("/", func(c *gin.Context) {
+			c.JSON(200, gin.H{
 				"message": "Hello, World!",
 			})
 		})

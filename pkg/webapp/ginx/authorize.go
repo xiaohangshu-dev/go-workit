@@ -50,6 +50,11 @@ func (a *Authorize) Handle() gin.HandlerFunc {
 		}
 
 		policyNames := nodeValue.AuthzPolicies
+		if len(policyNames) == 0 {
+			if defaultPolicy := a.GlobalPolicy(); defaultPolicy != "" {
+				policyNames = append(policyNames, defaultPolicy)
+			}
+		}
 
 		for _, policyName := range policyNames {
 			policyFunc, ok := a.Authorize(policyName)
@@ -57,7 +62,8 @@ func (a *Authorize) Handle() gin.HandlerFunc {
 				a.logger.Warn("authorization failed: policy not found",
 					zap.String("path", path),
 					zap.String("policy", policyName))
-				continue
+				c.AbortWithStatus(http.StatusForbidden)
+				return
 			}
 
 			if !policyFunc(claims) {
