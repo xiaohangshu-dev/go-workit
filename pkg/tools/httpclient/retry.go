@@ -1,4 +1,4 @@
-package net
+package httpclient
 
 import (
 	"math"

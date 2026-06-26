@@ -1,45 +1,30 @@
-// Package net 提供可注入的 HTTP 客户端。
+// Package httpclient 提供可注入的 HTTP 客户端。
 //
 // ## 使用方式
 //
-// ### 方式一：单个客户端（最常见）
-//
-//	// 注册
-//	builder.AddHttpClient(func(options *net.Options) {
-//	    options.BaseURL = "https://api.github.com"
+//	builder.AddHttpClientContext(func(opts *net.ContextOptions) {
+//	    opts.UseHttpClient("default", func(options *net.Options) {
+//	        options.BaseURL = "https://api.github.com"
+//	    })
+//	    opts.UseHttpClient("placeholder", func(options *net.Options) {
+//	        options.BaseURL = "https://jsonplaceholder.typicode.com"
+//	    })
 //	})
 //
-//	// 注入（直接声明字段即可）
-//	type UserService struct {
-//	    Client *net.Client  // 框架自动注入
+//	// default 可直接注入 *net.Client，命名客户端通过 fx.In + name 注入。
+//	type HttpClients struct {
+//	    fx.In
+//	    Placeholder *httpclient.Client `name:"placeholder"`
 //	}
-//	func (s *UserService) GetUser(ctx context.Context, id int) (*User, error) {
-//	    var user User
-//	    err := s.Client.Get(ctx, "/users/1", &user)
-//	    return &user, err
-//	}
-//
-// ### 方式二：多个命名客户端
-//
-//	// 注册
-//	builder.AddHttpClient("github", func(options *net.Options) {
-//	    options.BaseURL = "https://api.github.com"
-//	})
-//	builder.AddHttpClient("openai", func(options *net.Options) {
-//	    options.BaseURL = "https://api.openai.com"
-//	})
-//
-//	// 注入 Provider，通过名称获取
 //	type ApiService struct {
-//	    Clients *net.Provider  // 框架自动注入
+//	    Client  *httpclient.Client
+//	    Clients HttpClients
 //	}
 //	func (s *ApiService) DoWork(ctx context.Context) error {
-//	    github := s.Clients.Get("github")
-//	    openai := s.Clients.Get("openai")
-//	    github.Get(ctx, "/users", &result)
-//	    openai.Post(ctx, "/chat", body, &result)
+//	    s.Clients.Placeholder.Get(ctx, "/users", &result)
+//	    return nil
 //	}
-package net
+package httpclient
 
 import (
 	"bytes"
@@ -49,7 +34,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"sync"
 	"time"
 )
 
@@ -289,35 +273,4 @@ func (c *Client) Raw(ctx context.Context, method, path string, body io.Reader) (
 		return nil, err
 	}
 	return c.client.Do(req)
-}
-
-// ---------- Provider（支持多客户端） ----------
-
-// Provider 管理多个命名 HTTP 客户端。
-// 当注册了多个命名客户端时，注入 Provider 通过名称获取对应客户端。
-type Provider struct {
-	mu      sync.RWMutex
-	clients map[string]*Client
-}
-
-// NewProvider 创建 Provider。
-func NewProvider() *Provider {
-	return &Provider{
-		clients: make(map[string]*Client),
-	}
-}
-
-// Add 添加一个命名客户端。
-func (p *Provider) Add(name string, client *Client) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.clients[name] = client
-}
-
-// Get 根据名称获取客户端。
-// 如果只有一个默认客户端（未命名），可以通过空字符串 "" 获取。
-func (p *Provider) Get(name string) *Client {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	return p.clients[name]
 }

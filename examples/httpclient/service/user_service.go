@@ -5,7 +5,8 @@ import (
 	"context"
 	"fmt"
 
-	httpclient "github.com/xiaohangshu-dev/go-workit/pkg/tools/net"
+	"github.com/xiaohangshu-dev/go-workit/pkg/tools/httpclient"
+	"go.uber.org/fx"
 	"go.uber.org/zap"
 )
 
@@ -16,30 +17,33 @@ type User struct {
 	Email string `json:"email"`
 }
 
+// HttpClients 命名 HTTP 客户端集合。
+type HttpClients struct {
+	fx.In
+
+	Placeholder *httpclient.Client `name:"placeholder"`
+}
+
 // UserService 调用外部 API 获取用户数据。
-//
-// 方式一：直接注入 *httpclient.Client（适用于单个客户端）
-//
-//	type UserService struct {
-//	    Client *httpclient.Client
-//	}
-//
-// 方式二：注入 *httpclient.Provider（适用于多个命名客户端）
 type UserService struct {
-	Clients *httpclient.Provider
-	logger  *zap.Logger
+	Client      *httpclient.Client
+	Placeholder *httpclient.Client
+	logger      *zap.Logger
 }
 
 // NewUserService 构造函数。
-func NewUserService(clients *httpclient.Provider, logger *zap.Logger) *UserService {
-	return &UserService{Clients: clients, logger: logger}
+func NewUserService(client *httpclient.Client, clients HttpClients, logger *zap.Logger) *UserService {
+	return &UserService{
+		Client:      client,
+		Placeholder: clients.Placeholder,
+		logger:      logger,
+	}
 }
 
 // GetUser 使用命名客户端 "placeholder" 获取用户信息。
 func (s *UserService) GetUser(ctx context.Context, id int) (*User, error) {
-	client := s.Clients.Get("placeholder")
 	var user User
-	err := client.Get(ctx, fmt.Sprintf("/users/%d", id), &user)
+	err := s.Placeholder.Get(ctx, fmt.Sprintf("/users/%d", id), &user)
 	if err != nil {
 		return nil, err
 	}

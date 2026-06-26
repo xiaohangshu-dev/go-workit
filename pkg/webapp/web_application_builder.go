@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/xiaohangshu-dev/go-workit/pkg/app"
+	"github.com/xiaohangshu-dev/go-workit/pkg/tools/httpclient"
 	"github.com/xiaohangshu-dev/go-workit/pkg/webapp/auth"
 	"github.com/xiaohangshu-dev/go-workit/pkg/webapp/authz"
 	"github.com/xiaohangshu-dev/go-workit/pkg/webapp/dbctx"
@@ -131,6 +132,12 @@ func (b *WebApplicationBuilder) AddDbContext(fn func(options *dbctx.Options)) *W
 
 	b.ApplicationBuilder.AddServices(opts.Container()...)
 
+	return b
+}
+
+// AddHttpClientContext 注册 HTTP 客户端上下文。
+func (b *WebApplicationBuilder) AddHttpClientContext(fn func(options *httpclient.ContextOptions)) *WebApplicationBuilder {
+	b.ApplicationBuilder.AddHttpClientContext(fn)
 	return b
 }
 

@@ -143,22 +143,24 @@ pkg/webapp/problem/
 
 ```go
 // 使用方式
-builder.AddNamedHttpClient("github", func(options *httpclient.Options) {
-    options.BaseURL = "https://api.github.com"
-    // 重试策略
-    options.Retry = httpclient.RetryOptions{
-        MaxRetries:  3,
-        BaseDelay:   100 * time.Millisecond,
-        MaxDelay:    2 * time.Second,
-        RetryOn:     []int{408, 429, 500, 502, 503},
-    }
-    // 熔断器策略
-    options.CircuitBreaker = httpclient.CircuitBreakerOptions{
-        FailureThreshold:    5,     // 连续失败次数
-        SuccessThreshold:    2,     // 恢复后需要成功次数
-        HalfOpenMaxRequests: 1,     // 半开状态最大请求数
-        OpenDuration:        30 * time.Second, // 断开持续时间
-    }
+builder.AddHttpClientContext(func(opts *httpclient.ContextOptions) {
+    opts.UseHttpClient("github", func(options *httpclient.Options) {
+        options.BaseURL = "https://api.github.com"
+        // 重试策略
+        options.Retry = httpclient.RetryOptions{
+            MaxRetries:  3,
+            BaseDelay:   100 * time.Millisecond,
+            MaxDelay:    2 * time.Second,
+            RetryOn:     []int{408, 429, 500, 502, 503},
+        }
+        // 熔断器策略
+        options.CircuitBreaker = httpclient.CircuitBreakerOptions{
+            FailureThreshold:    5,     // 连续失败次数
+            SuccessThreshold:    2,     // 恢复后需要成功次数
+            HalfOpenMaxRequests: 1,     // 半开状态最大请求数
+            OpenDuration:        30 * time.Second, // 断开持续时间
+        }
+    })
 })
 ```
 

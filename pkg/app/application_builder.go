@@ -6,7 +6,7 @@ import (
 	"github.com/spf13/viper"
 	"github.com/xiaohangshu-dev/go-workit/pkg/config"
 	"github.com/xiaohangshu-dev/go-workit/pkg/ddd"
-	httpclient "github.com/xiaohangshu-dev/go-workit/pkg/tools/net"
+	"github.com/xiaohangshu-dev/go-workit/pkg/tools/httpclient"
 	"go.uber.org/fx"
 )
 
@@ -51,7 +51,7 @@ func NewBuilder() *ApplicationBuilder {
 
 	return &ApplicationBuilder{
 		config:        viper,
-		options:       []fx.Option{fx.Provide(httpclient.NewProvider)},
+		options:       make([]fx.Option, 0),
 		configBuilder: configBuilder,
 	}
 }
@@ -117,55 +117,23 @@ func (b *ApplicationBuilder) AddDomainEventBus(eventHandlerRegistrations ...fx.O
 	return b.AddServices(ddd.DomainEventBusModule(eventHandlerRegistrations...))
 }
 
-// AddHttpClient 注册默认 HTTP 客户端。
+// AddHttpClientContext 注册 HTTP 客户端上下文。
 //
-// 使用后可通过 DI 直接注入 *httpclient.Client，适用于只请求一个外部服务的场景。
+// 适用于统一注册一个或多个 HTTP 客户端，使用方式与 AddGormContext 保持一致。
 //
-//	type UserService struct {
-//	    Client *httpclient.Client  // 框架自动注入
-//	}
-//
-//	client.Get(ctx, "/users", &users)
-//	client.Post(ctx, "/users", body, &result)
-func (b *ApplicationBuilder) AddHttpClient(configure func(options *httpclient.Options)) *ApplicationBuilder {
-	opts := httpclient.NewOptions()
+//	builder.AddHttpClientContext(func(opts *httpclient.ContextOptions) {
+//	    opts.UseHttpClient("default", func(options *httpclient.Options) {
+//	        options.BaseURL = "https://api.github.com"
+//	    })
+//	    opts.UseHttpClient("placeholder", func(options *httpclient.Options) {
+//	        options.BaseURL = "https://jsonplaceholder.typicode.com"
+//	    })
+//	})
+func (b *ApplicationBuilder) AddHttpClientContext(configure func(options *httpclient.ContextOptions)) *ApplicationBuilder {
+	opts := httpclient.NewContextOptions()
 	if configure != nil {
 		configure(opts)
 	}
-	client := httpclient.NewClient(opts)
-	b.options = append(b.options,
-		fx.Provide(func() *httpclient.Client { return client }),
-		fx.Invoke(func(p *httpclient.Provider) { p.Add("", client) }),
-	)
-	return b
-}
-
-// AddNamedHttpClient 注册命名 HTTP 客户端。
-//
-// 适用于请求多个不同外部服务的场景。通过 *httpclient.Provider 获取指定名称的客户端。
-//
-//	builder.AddNamedHttpClient("github", func(options *httpclient.Options) {
-//	    options.BaseURL = "https://api.github.com"
-//	})
-//	builder.AddNamedHttpClient("openai", func(options *httpclient.Options) {
-//	    options.BaseURL = "https://api.openai.com"
-//	})
-//
-//	type ApiService struct {
-//	    Clients *httpclient.Provider  // 框架自动注入
-//	}
-//	func (s *ApiService) DoWork() {
-//	    s.Clients.Get("github").Get(ctx, "/users", &result)
-//	    s.Clients.Get("openai").Post(ctx, "/chat", body, &result)
-//	}
-func (b *ApplicationBuilder) AddNamedHttpClient(name string, configure func(options *httpclient.Options)) *ApplicationBuilder {
-	opts := httpclient.NewOptions()
-	if configure != nil {
-		configure(opts)
-	}
-	client := httpclient.NewClient(opts)
-	b.options = append(b.options,
-		fx.Invoke(func(p *httpclient.Provider) { p.Add(name, client) }),
-	)
+	b.AddServices(opts.Container()...)
 	return b
 }

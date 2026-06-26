@@ -86,6 +86,8 @@ go-workit 缺少：
 - 超时策略
 - 舱壁隔离（Bulkhead）
 
+go-workit 当前通过 `builder.AddHttpClientContext(...)` 统一注册 HTTP 客户端。
+
 ---
 
 ## 四、缓存
